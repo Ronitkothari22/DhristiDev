@@ -1,35 +1,38 @@
 # DrishtiDev - Chrome Extension for Web Developers
 
 ## Project Overview
-DrishtiDev is a Chrome browser extension designed to enhance web development workflow by providing powerful inspection, responsive design preview, and network monitoring capabilities. The name combines "Drishti" (Sanskrit for "vision") with "Dev" (developer), reflecting its purpose of providing clear insights for web developers.
+DrishtiDev is a Chrome browser extension designed to streamline web development by offering advanced inspection, responsive design preview, and network monitoring tools. The name "DrishtiDev" combines "Drishti" (Sanskrit for "vision") with "Dev" (developer), symbolizing clear insights into web development workflows. Unlike traditional extensions, DrishtiDev uses a persistent popup triggered by the extension icon and overlay popups that appear near clicked elements or features on the webpage for direct interaction and editing.
 
 ## Core Features
 
 ### 1. Element Inspector
-- Real-time element inspection on hover
-- Comprehensive CSS property display
-- One-click data copying
-- Type-safe DOM manipulation
+- **Behavior**: Clicking the extension icon opens a persistent popup. Clicking any webpage element displays an overlay popup near the element with:
+  - Full HTML tag, classes, ID, and computed CSS properties (e.g., margin, padding, color).
+  - Real-time CSS editing options (e.g., input fields to modify styles).
+  - One-click copy of element data.
+- **Details**: Type-safe DOM access, persistent until dismissed.
 
 ### 2. Responsive Design Preview
-- Multi-device viewport simulation
-- Synchronized scrolling and interactions
-- Custom viewport size support
-- Real-time preview updates
+- **Behavior**: From the persistent popup, toggle a responsive mode. Clicking a "Preview" button shows an overlay with multiple device viewports (e.g., iPhone, iPad, Desktop) near the clicked area.
+  - Synchronized scrolling and clicking across viewports.
+  - Option to add custom viewport sizes.
+- **Details**: Real-time updates, scalable viewport management.
 
 ### 3. Network URL Tracking
-- Live network request monitoring
-- Status code tracking
-- Request/response data logging
-- Type-safe network data handling
+- **Behavior**: From the persistent popup, enable network tracking. Clicking a "Network" option displays an overlay near the clicked area listing live network requests (URLs, status codes).
+  - View request/response details in the overlay.
+  - Filterable log with real-time updates.
+- **Details**: Type-safe network data, integrated with Chrome’s debugger API.
 
 ## Technical Stack
-- **Language**: TypeScript
+- **Language**: TypeScript (compiled to vanilla JS)
 - **Platform**: Chrome WebExtensions API
-- **Build Tools**: TypeScript Compiler
+- **Build Tools**: TypeScript Compiler (`tsc`)
 - **Dependencies**: 
-  - @types/chrome (for TypeScript definitions)
+  - `@types/chrome` (TypeScript definitions for Chrome APIs)
   - No external frameworks or paid services
+
+## Project Structure
 
 ## Project Structure
 ```

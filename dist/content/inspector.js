@@ -1,0 +1,512 @@
+"use strict";
+/// <reference types="chrome"/>
+// CSS properties that can be edited in the overlay
+const EDITABLE_CSS_PROPERTIES = [
+    'color',
+    'background-color',
+    'margin',
+    'padding',
+    'font-size',
+    'border',
+    'width',
+    'height',
+    'display',
+    'position'
+];
+// Store the currently active overlay element
+let activeOverlay = null;
+// Store the currently inspected element
+let inspectedElement = null;
+// Track if inspector mode is active
+let inspectorActive = false;
+// Listen for messages from the popup
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.action === 'toggleInspector') {
+        toggleInspectorMode(message.enabled);
+    }
+    else if (message.action === 'ping') {
+        // Respond to ping to indicate content script is loaded
+        sendResponse({ status: 'ok' });
+    }
+    // Return true to indicate async response
+    return true;
+});
+/**
+ * Toggle inspector mode on/off
+ */
+function toggleInspectorMode(enabled) {
+    inspectorActive = enabled;
+    if (enabled) {
+        // Add inspector class to body to change cursor
+        document.body.classList.add('drishti-inspector-active');
+        // Add click listener
+        document.addEventListener('click', handleElementClick, true);
+        // Add mouseover for highlighting
+        document.addEventListener('mouseover', handleElementMouseOver, true);
+        document.addEventListener('mouseout', handleElementMouseOut, true);
+    }
+    else {
+        // Remove inspector class from body
+        document.body.classList.remove('drishti-inspector-active');
+        // Remove event listeners
+        document.removeEventListener('click', handleElementClick, true);
+        document.removeEventListener('mouseover', handleElementMouseOver, true);
+        document.removeEventListener('mouseout', handleElementMouseOut, true);
+        // Remove any active overlay
+        removeOverlay();
+    }
+}
+/**
+ * Handle element click in inspector mode
+ */
+function handleElementClick(event) {
+    if (!inspectorActive)
+        return;
+    // Prevent default action (e.g., following links)
+    event.preventDefault();
+    event.stopPropagation();
+    // Check if we clicked inside the overlay - if so, don't do anything
+    let target = event.target;
+    let isOverlayClick = false;
+    while (target && target !== document.body) {
+        if (target.classList.contains('drishti-overlay-container')) {
+            isOverlayClick = true;
+            break;
+        }
+        target = target.parentElement;
+    }
+    if (isOverlayClick) {
+        return; // Don't process clicks inside the overlay
+    }
+    // Get the clicked element
+    const element = event.target;
+    if (!element)
+        return;
+    // Store as inspected element
+    inspectedElement = element;
+    // Extract element data
+    const elementData = extractElementData(element);
+    // Show overlay with element data
+    showOverlay(element, elementData, event);
+}
+/**
+ * Handle element mouseover in inspector mode
+ */
+function handleElementMouseOver(event) {
+    if (!inspectorActive)
+        return;
+    const element = event.target;
+    if (!element)
+        return;
+    // Highlight hovered element
+    element.classList.add('drishti-element-highlight');
+}
+/**
+ * Handle element mouseout in inspector mode
+ */
+function handleElementMouseOut(event) {
+    if (!inspectorActive)
+        return;
+    const element = event.target;
+    if (!element)
+        return;
+    // Remove highlight
+    element.classList.remove('drishti-element-highlight');
+}
+/**
+ * Extract element data for inspection
+ */
+function extractElementData(element) {
+    // Get computed styles
+    const computedStyle = window.getComputedStyle(element);
+    const computedStyles = {};
+    // Extract editable CSS properties
+    EDITABLE_CSS_PROPERTIES.forEach(prop => {
+        computedStyles[prop] = computedStyle.getPropertyValue(prop);
+    });
+    // Get attributes
+    const attributes = {};
+    for (let i = 0; i < element.attributes.length; i++) {
+        const attr = element.attributes[i];
+        attributes[attr.name] = attr.value;
+    }
+    // Create element data
+    const elementData = {
+        tagName: element.tagName.toLowerCase(),
+        id: element.id || '',
+        classList: Array.from(element.classList),
+        attributes,
+        computedStyles,
+        xpath: getXPath(element)
+    };
+    return elementData;
+}
+/**
+ * Create and show overlay with element data
+ */
+function showOverlay(element, elementData, event) {
+    // Remove any existing overlay
+    removeOverlay();
+    // Create overlay container
+    const overlay = document.createElement('div');
+    overlay.className = 'drishti-overlay-container';
+    // Add header
+    const header = document.createElement('div');
+    header.className = 'drishti-overlay-header';
+    const title = document.createElement('h3');
+    title.textContent = 'Element Inspector';
+    const closeButton = document.createElement('button');
+    closeButton.className = 'drishti-overlay-close';
+    closeButton.textContent = '×';
+    closeButton.addEventListener('click', removeOverlay);
+    header.appendChild(title);
+    header.appendChild(closeButton);
+    overlay.appendChild(header);
+    // Add body
+    const body = document.createElement('div');
+    body.className = 'drishti-overlay-body';
+    // Element info section
+    const infoSection = document.createElement('div');
+    infoSection.className = 'drishti-element-info';
+    // Tag info
+    const tagInfo = document.createElement('div');
+    tagInfo.className = 'drishti-element-tag';
+    // Format the tag with id and classes
+    let tagText = `<${elementData.tagName}`;
+    if (elementData.id) {
+        tagText += ` id="${elementData.id}"`;
+    }
+    if (elementData.classList.length > 0) {
+        tagText += ` class="${elementData.classList.join(' ')}"`;
+    }
+    tagText += '>';
+    // Add a header for the element info section
+    const elementInfoHeader = document.createElement('h4');
+    elementInfoHeader.textContent = 'Element Information';
+    elementInfoHeader.style.marginBottom = '10px';
+    infoSection.appendChild(elementInfoHeader);
+    // Create an editable tag display
+    const tagDisplay = document.createElement('div');
+    tagDisplay.className = 'drishti-tag-display';
+    // Element Type with edit option
+    const elementTypeSection = document.createElement('div');
+    elementTypeSection.className = 'drishti-element-property';
+    const typeLabel = document.createElement('strong');
+    typeLabel.textContent = 'Element Type: ';
+    typeLabel.style.marginRight = '8px';
+    const typeValue = document.createElement('span');
+    typeValue.textContent = elementData.tagName;
+    typeValue.style.fontFamily = 'Courier New, monospace';
+    elementTypeSection.appendChild(typeLabel);
+    elementTypeSection.appendChild(typeValue);
+    tagDisplay.appendChild(elementTypeSection);
+    // ID with edit option
+    if (elementData.id) {
+        const idSection = document.createElement('div');
+        idSection.className = 'drishti-element-property';
+        const idLabel = document.createElement('strong');
+        idLabel.textContent = 'ID: ';
+        idLabel.style.marginRight = '8px';
+        const idInput = document.createElement('input');
+        idInput.type = 'text';
+        idInput.value = elementData.id;
+        idInput.className = 'drishti-element-input';
+        idInput.addEventListener('change', () => {
+            if (inspectedElement) {
+                inspectedElement.id = idInput.value;
+            }
+        });
+        idSection.appendChild(idLabel);
+        idSection.appendChild(idInput);
+        tagDisplay.appendChild(idSection);
+    }
+    // Classes with edit option
+    if (elementData.classList.length > 0) {
+        const classSection = document.createElement('div');
+        classSection.className = 'drishti-element-property';
+        const classLabel = document.createElement('strong');
+        classLabel.textContent = 'Classes: ';
+        classLabel.style.marginRight = '8px';
+        const classInput = document.createElement('input');
+        classInput.type = 'text';
+        classInput.value = elementData.classList.join(' ');
+        classInput.className = 'drishti-element-input';
+        classInput.addEventListener('change', () => {
+            if (inspectedElement) {
+                // Remove all existing classes
+                elementData.classList.forEach(cls => {
+                    inspectedElement === null || inspectedElement === void 0 ? void 0 : inspectedElement.classList.remove(cls);
+                });
+                // Add new classes
+                const newClasses = classInput.value.split(' ').filter(c => c.trim() !== '');
+                newClasses.forEach(cls => {
+                    inspectedElement === null || inspectedElement === void 0 ? void 0 : inspectedElement.classList.add(cls);
+                });
+            }
+        });
+        classSection.appendChild(classLabel);
+        classSection.appendChild(classInput);
+        tagDisplay.appendChild(classSection);
+    }
+    // Original tag format for reference (read-only)
+    const originalTag = document.createElement('div');
+    originalTag.className = 'drishti-original-tag';
+    originalTag.textContent = tagText;
+    originalTag.style.marginTop = '8px';
+    originalTag.style.padding = '6px 10px';
+    originalTag.style.background = '#f0f0f0';
+    originalTag.style.borderRadius = '4px';
+    originalTag.style.fontSize = '12px';
+    originalTag.style.fontFamily = 'Courier New, monospace';
+    tagDisplay.appendChild(originalTag);
+    infoSection.appendChild(tagDisplay);
+    // Add the original tag display for reference (hidden by default)
+    tagInfo.textContent = tagText;
+    tagInfo.style.display = 'none';
+    infoSection.appendChild(tagInfo);
+    // Attributes section with improved styling
+    if (Object.keys(elementData.attributes).length > 0) {
+        const attrSection = document.createElement('div');
+        attrSection.className = 'drishti-element-attributes';
+        const attrTitle = document.createElement('h4');
+        attrTitle.textContent = 'Other Attributes:';
+        attrTitle.style.margin = '12px 0 8px 0';
+        attrSection.appendChild(attrTitle);
+        const attrTable = document.createElement('table');
+        attrTable.className = 'drishti-attr-table';
+        attrTable.style.width = '100%';
+        attrTable.style.borderCollapse = 'collapse';
+        for (const [key, value] of Object.entries(elementData.attributes)) {
+            if (key !== 'id' && key !== 'class') {
+                const row = document.createElement('tr');
+                const keyCell = document.createElement('td');
+                keyCell.textContent = key;
+                keyCell.style.padding = '4px 8px';
+                keyCell.style.fontWeight = 'bold';
+                keyCell.style.width = '30%';
+                const valueCell = document.createElement('td');
+                const valueInput = document.createElement('input');
+                valueInput.type = 'text';
+                valueInput.value = value;
+                valueInput.className = 'drishti-element-input';
+                valueInput.style.width = '100%';
+                valueInput.addEventListener('change', () => {
+                    if (inspectedElement) {
+                        inspectedElement.setAttribute(key, valueInput.value);
+                    }
+                });
+                valueCell.appendChild(valueInput);
+                valueCell.style.padding = '4px 0';
+                row.appendChild(keyCell);
+                row.appendChild(valueCell);
+                attrTable.appendChild(row);
+            }
+        }
+        attrSection.appendChild(attrTable);
+        infoSection.appendChild(attrSection);
+    }
+    body.appendChild(infoSection);
+    // CSS editor section
+    const cssEditor = document.createElement('div');
+    cssEditor.className = 'drishti-css-editor';
+    const cssTitle = document.createElement('h4');
+    cssTitle.textContent = 'Edit CSS Properties:';
+    cssEditor.appendChild(cssTitle);
+    // Create editable property fields
+    EDITABLE_CSS_PROPERTIES.forEach(prop => {
+        const propContainer = document.createElement('div');
+        propContainer.className = 'drishti-css-property';
+        const label = document.createElement('label');
+        label.textContent = prop + ':';
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = elementData.computedStyles[prop] || '';
+        input.dataset.property = prop;
+        // For color properties, add a color indicator
+        if (prop === 'color' || prop === 'background-color') {
+            // Add a small color swatch before the input
+            const colorValue = elementData.computedStyles[prop];
+            if (colorValue && colorValue !== 'transparent' && colorValue !== 'rgba(0, 0, 0, 0)') {
+                const colorSwatch = document.createElement('span');
+                colorSwatch.style.position = 'absolute';
+                colorSwatch.style.width = '16px';
+                colorSwatch.style.height = '16px';
+                colorSwatch.style.backgroundColor = colorValue;
+                colorSwatch.style.borderRadius = '3px';
+                colorSwatch.style.left = '10px';
+                colorSwatch.style.top = '50%';
+                colorSwatch.style.transform = 'translateY(-50%)';
+                colorSwatch.style.border = '1px solid rgba(0,0,0,0.1)';
+                // Wrap input in a container for positioning
+                const inputWrapper = document.createElement('div');
+                inputWrapper.style.position = 'relative';
+                inputWrapper.style.flex = '1';
+                inputWrapper.appendChild(colorSwatch);
+                inputWrapper.appendChild(input);
+                propContainer.appendChild(label);
+                propContainer.appendChild(inputWrapper);
+            }
+            else {
+                propContainer.appendChild(label);
+                propContainer.appendChild(input);
+            }
+        }
+        else {
+            propContainer.appendChild(label);
+            propContainer.appendChild(input);
+        }
+        // Always add the property container to the CSS editor
+        cssEditor.appendChild(propContainer);
+        // Update CSS on input with debouncing for better performance
+        let debounceTimeout = null;
+        input.addEventListener('input', () => {
+            if (debounceTimeout) {
+                clearTimeout(debounceTimeout);
+            }
+            debounceTimeout = setTimeout(() => {
+                var _a;
+                if (inspectedElement) {
+                    try {
+                        // Update the element style
+                        inspectedElement.style.setProperty(prop, input.value);
+                        // For color properties, update the color swatch
+                        if ((prop === 'color' || prop === 'background-color') &&
+                            ((_a = input.parentElement) === null || _a === void 0 ? void 0 : _a.querySelector('span'))) {
+                            const colorSwatch = input.parentElement.querySelector('span');
+                            if (colorSwatch) {
+                                colorSwatch.style.backgroundColor = input.value;
+                            }
+                        }
+                    }
+                    catch (error) {
+                        console.error(`Failed to set ${prop}:`, error);
+                    }
+                }
+            }, 150); // Small delay for smoother experience
+        });
+    });
+    body.appendChild(cssEditor);
+    // Action buttons
+    const actions = document.createElement('div');
+    actions.className = 'drishti-actions';
+    // Copy button
+    const copyButton = document.createElement('button');
+    copyButton.className = 'drishti-button';
+    copyButton.textContent = 'Copy Element Data';
+    copyButton.addEventListener('click', () => {
+        try {
+            const dataStr = JSON.stringify(elementData, null, 2);
+            navigator.clipboard.writeText(dataStr).then(() => {
+                // Show feedback (change button text temporarily)
+                copyButton.textContent = 'Copied!';
+                setTimeout(() => {
+                    copyButton.textContent = 'Copy Element Data';
+                }, 2000);
+            });
+        }
+        catch (error) {
+            console.error('Failed to copy data:', error);
+        }
+    });
+    // Reset button
+    const resetButton = document.createElement('button');
+    resetButton.className = 'drishti-button secondary';
+    resetButton.textContent = 'Reset Changes';
+    resetButton.addEventListener('click', () => {
+        if (inspectedElement) {
+            // Reset inline styles
+            EDITABLE_CSS_PROPERTIES.forEach(prop => {
+                inspectedElement === null || inspectedElement === void 0 ? void 0 : inspectedElement.style.removeProperty(prop);
+            });
+            // Refresh overlay with updated data
+            const updatedData = extractElementData(inspectedElement);
+            showOverlay(inspectedElement, updatedData, event);
+        }
+    });
+    actions.appendChild(copyButton);
+    actions.appendChild(resetButton);
+    body.appendChild(actions);
+    overlay.appendChild(body);
+    // Position the overlay near the element
+    positionOverlay(overlay, event);
+    // Add to document
+    document.body.appendChild(overlay);
+    // Store active overlay
+    activeOverlay = overlay;
+}
+/**
+ * Position the overlay based on click position
+ */
+function positionOverlay(overlay, event) {
+    // Get viewport dimensions
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    // Initial position at click point
+    let left = event.clientX + 10; // 10px to the right of cursor
+    let top = event.clientY + 10; // 10px below cursor
+    // Add overlay to the document temporarily to get its dimensions
+    overlay.style.visibility = 'hidden';
+    document.body.appendChild(overlay);
+    const overlayWidth = overlay.offsetWidth;
+    const overlayHeight = overlay.offsetHeight;
+    document.body.removeChild(overlay);
+    overlay.style.visibility = 'visible';
+    // Adjust if overlay would go outside viewport
+    if (left + overlayWidth > viewportWidth) {
+        left = Math.max(0, event.clientX - overlayWidth - 10);
+    }
+    if (top + overlayHeight > viewportHeight) {
+        top = Math.max(0, event.clientY - overlayHeight - 10);
+    }
+    // Set position
+    overlay.style.left = `${left}px`;
+    overlay.style.top = `${top}px`;
+}
+/**
+ * Remove the active overlay
+ */
+function removeOverlay() {
+    if (activeOverlay && activeOverlay.parentNode) {
+        activeOverlay.parentNode.removeChild(activeOverlay);
+        activeOverlay = null;
+    }
+}
+/**
+ * Get XPath for an element
+ */
+function getXPath(element) {
+    if (!element)
+        return '';
+    try {
+        let xpath = '';
+        let currentElement = element;
+        while (currentElement && currentElement.nodeType === Node.ELEMENT_NODE) {
+            let currentPath = currentElement.tagName.toLowerCase();
+            // Add id if available
+            if (currentElement.id) {
+                xpath = `//${currentPath}[@id="${currentElement.id}"]` + xpath;
+                break;
+            }
+            // Get index among siblings
+            let count = 1;
+            let sibling = currentElement.previousElementSibling;
+            while (sibling) {
+                if (sibling.tagName === currentElement.tagName) {
+                    count++;
+                }
+                sibling = sibling.previousElementSibling;
+            }
+            // Add position if needed
+            if (count > 1) {
+                currentPath += `[${count}]`;
+            }
+            xpath = `/${currentPath}` + xpath;
+            currentElement = currentElement.parentElement;
+        }
+        return xpath;
+    }
+    catch (error) {
+        console.error('Error generating XPath:', error);
+        return '';
+    }
+}

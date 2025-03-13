@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebInspect Pro</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="popup-container">
+    <header>
+      <h1>WebInspect Pro</h1>
+      <p>Advanced Web Developer Toolkit</p>
+      <span id="statusDisplay" class="status-message"></span>
+    </header>
+    
+    <div class="tools-container">
+      <div class="tool-section">
+        <h2>Element Inspector</h2>
+        <button id="inspectorToggle" class="toggle-btn">Enable Inspector</button>
+        <p class="tool-description">Click elements to view and edit their properties in real-time</p>
+      </div>
+      
+      <div class="tool-section disabled">
+        <h2>Responsive Design</h2>
+        <button id="responsiveToggle" class="toggle-btn" disabled>Enable Responsive</button>
+        <p class="tool-description">Test responsive layouts with multiple device previews</p>
+      </div>
+      
+      <div class="tool-section disabled">
+        <h2>Network Monitor</h2>
+        <button id="networkToggle" class="toggle-btn" disabled>Enable Network</button>
+        <p class="tool-description">Track and analyze network requests as they happen</p>
+      </div>
+    </div>
+    
+    <footer>
+      <p>Pro tip: Inspect mode lets you edit CSS directly on the page</p>
+    </footer>
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html> 

@@ -1,0 +1,22 @@
+{
+  "name": "drishtidev",
+  "version": "1.0.0",
+  "description": "A Chrome extension for web developers with advanced inspection tools",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch"
+  },
+  "keywords": [
+    "chrome-extension",
+    "web-development",
+    "inspector",
+    "developer-tools"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/chrome": "^0.0.260",
+    "typescript": "^5.8.2"
+  }
+}

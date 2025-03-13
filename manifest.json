@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "WebInspect Pro",
+  "version": "1.0.0",
+  "description": "Advanced web inspection and development toolkit",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "action": {
+    "default_popup": "dist/popup/popup.html",
+    "default_icon": {
+      "16": "assets/icon16.png",
+      "48": "assets/icon48.png",
+      "128": "assets/icon128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["dist/content/inspector.js"],
+      "css": ["dist/content/styles.css"]
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["dist/overlay/*"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "icons": {
+    "16": "assets/icon16.png",
+    "48": "assets/icon48.png",
+    "128": "assets/icon128.png"
+  }
+} 
