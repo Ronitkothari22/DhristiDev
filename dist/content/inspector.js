@@ -23,13 +23,15 @@ let inspectorActive = false;
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === 'toggleInspector') {
         toggleInspectorMode(message.enabled);
+        // Immediately send a response to prevent channel closed error
+        sendResponse({ success: true });
     }
     else if (message.action === 'ping') {
         // Respond to ping to indicate content script is loaded
         sendResponse({ status: 'ok' });
     }
-    // Return true to indicate async response
-    return true;
+    // Return false since we're handling responses synchronously
+    return false;
 });
 /**
  * Toggle inspector mode on/off
@@ -130,14 +132,25 @@ function extractElementData(element) {
         const attr = element.attributes[i];
         attributes[attr.name] = attr.value;
     }
+    // Get the element's class list but filter out our highlight class
+    const classList = Array.from(element.classList).filter(cls => cls !== 'drishti-element-highlight');
+    // Extract text content (trimmed and limited to a reasonable length)
+    let textContent = '';
+    if (element.textContent) {
+        textContent = element.textContent.trim();
+        if (textContent.length > 100) {
+            textContent = textContent.substring(0, 100) + '...';
+        }
+    }
     // Create element data
     const elementData = {
         tagName: element.tagName.toLowerCase(),
         id: element.id || '',
-        classList: Array.from(element.classList),
+        classList,
         attributes,
         computedStyles,
-        xpath: getXPath(element)
+        xpath: getXPath(element),
+        textContent
     };
     return elementData;
 }
@@ -158,7 +171,11 @@ function showOverlay(element, elementData, event) {
     const closeButton = document.createElement('button');
     closeButton.className = 'drishti-overlay-close';
     closeButton.textContent = '×';
-    closeButton.addEventListener('click', removeOverlay);
+    closeButton.type = 'button';
+    // Fix: Make sure the close button works by using a direct function reference
+    closeButton.addEventListener('click', () => {
+        removeOverlay();
+    }, false);
     header.appendChild(title);
     header.appendChild(closeButton);
     overlay.appendChild(header);
@@ -200,6 +217,30 @@ function showOverlay(element, elementData, event) {
     elementTypeSection.appendChild(typeLabel);
     elementTypeSection.appendChild(typeValue);
     tagDisplay.appendChild(elementTypeSection);
+    // Text Content (if available)
+    if (elementData.textContent) {
+        const contentSection = document.createElement('div');
+        contentSection.className = 'drishti-element-property';
+        const contentLabel = document.createElement('strong');
+        contentLabel.textContent = 'Text Content: ';
+        contentLabel.style.marginRight = '8px';
+        // Replace span with textarea for editing
+        const contentInput = document.createElement('textarea');
+        contentInput.value = elementData.textContent;
+        contentInput.className = 'drishti-element-textarea';
+        contentInput.rows = 2;
+        contentInput.style.width = '100%';
+        // Update the element's text content when the input changes
+        contentInput.addEventListener('input', () => {
+            if (inspectedElement) {
+                // Preserve child elements by only updating text nodes
+                updateElementTextContent(inspectedElement, contentInput.value);
+            }
+        });
+        contentSection.appendChild(contentLabel);
+        contentSection.appendChild(contentInput);
+        tagDisplay.appendChild(contentSection);
+    }
     // ID with edit option
     if (elementData.id) {
         const idSection = document.createElement('div');
@@ -395,17 +436,45 @@ function showOverlay(element, elementData, event) {
     copyButton.textContent = 'Copy Element Data';
     copyButton.addEventListener('click', () => {
         try {
-            const dataStr = JSON.stringify(elementData, null, 2);
-            navigator.clipboard.writeText(dataStr).then(() => {
+            // Clean the data to make it more readable
+            const cleanData = {
+                tagName: elementData.tagName,
+                id: elementData.id,
+                classes: elementData.classList,
+                textContent: elementData.textContent,
+                computedStyles: elementData.computedStyles
+            };
+            const dataStr = JSON.stringify(cleanData, null, 2);
+            // Use a more reliable clipboard copy method
+            const textArea = document.createElement('textarea');
+            textArea.value = dataStr;
+            textArea.style.position = 'fixed'; // Avoid scrolling to bottom
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            const successful = document.execCommand('copy');
+            document.body.removeChild(textArea);
+            if (successful) {
                 // Show feedback (change button text temporarily)
                 copyButton.textContent = 'Copied!';
+                copyButton.style.backgroundColor = '#4caf50';
                 setTimeout(() => {
                     copyButton.textContent = 'Copy Element Data';
+                    copyButton.style.backgroundColor = '';
                 }, 2000);
-            });
+            }
+            else {
+                throw new Error('Copy command was unsuccessful');
+            }
         }
         catch (error) {
             console.error('Failed to copy data:', error);
+            copyButton.textContent = 'Copy Failed';
+            copyButton.style.backgroundColor = '#f44336';
+            setTimeout(() => {
+                copyButton.textContent = 'Copy Element Data';
+                copyButton.style.backgroundColor = '';
+            }, 2000);
         }
     });
     // Reset button
@@ -414,13 +483,29 @@ function showOverlay(element, elementData, event) {
     resetButton.textContent = 'Reset Changes';
     resetButton.addEventListener('click', () => {
         if (inspectedElement) {
-            // Reset inline styles
-            EDITABLE_CSS_PROPERTIES.forEach(prop => {
-                inspectedElement === null || inspectedElement === void 0 ? void 0 : inspectedElement.style.removeProperty(prop);
-            });
-            // Refresh overlay with updated data
-            const updatedData = extractElementData(inspectedElement);
-            showOverlay(inspectedElement, updatedData, event);
+            try {
+                // Store original element for reference
+                const originalElement = inspectedElement;
+                // Reset inline styles
+                inspectedElement.removeAttribute('style');
+                // Visual feedback
+                resetButton.textContent = 'Reset Complete!';
+                setTimeout(() => {
+                    resetButton.textContent = 'Reset Changes';
+                    // Refresh overlay with updated data if the element still exists in DOM
+                    if (document.contains(originalElement)) {
+                        const updatedData = extractElementData(originalElement);
+                        showOverlay(originalElement, updatedData, event);
+                    }
+                }, 1000);
+            }
+            catch (error) {
+                console.error('Error resetting styles:', error);
+                resetButton.textContent = 'Reset Failed';
+                setTimeout(() => {
+                    resetButton.textContent = 'Reset Changes';
+                }, 1000);
+            }
         }
     });
     actions.appendChild(copyButton);
@@ -467,8 +552,19 @@ function positionOverlay(overlay, event) {
  */
 function removeOverlay() {
     if (activeOverlay && activeOverlay.parentNode) {
-        activeOverlay.parentNode.removeChild(activeOverlay);
+        // Ensure we're removing the overlay from its parent
+        try {
+            activeOverlay.parentNode.removeChild(activeOverlay);
+        }
+        catch (e) {
+            console.error('Error removing overlay:', e);
+        }
         activeOverlay = null;
+        // Log for debugging
+        console.log('Overlay removed');
+    }
+    else {
+        console.log('No active overlay to remove');
     }
 }
 /**
@@ -508,5 +604,45 @@ function getXPath(element) {
     catch (error) {
         console.error('Error generating XPath:', error);
         return '';
+    }
+}
+/**
+ * Update an element's text content while preserving its child elements
+ * This is a smarter way to update text without destroying child elements
+ */
+function updateElementTextContent(element, newText) {
+    var _a;
+    try {
+        // If the element has no children, we can simply update textContent
+        if (element.childNodes.length === 0 || (element.childNodes.length === 1 && ((_a = element.firstChild) === null || _a === void 0 ? void 0 : _a.nodeType) === Node.TEXT_NODE)) {
+            element.textContent = newText;
+            return;
+        }
+        // For elements with children, we need to find just the text nodes
+        let textNode = null;
+        // Find the first text node
+        for (let i = 0; i < element.childNodes.length; i++) {
+            if (element.childNodes[i].nodeType === Node.TEXT_NODE) {
+                textNode = element.childNodes[i];
+                break;
+            }
+        }
+        // If there's a text node, update it, otherwise create one
+        if (textNode) {
+            textNode.nodeValue = newText;
+        }
+        else {
+            // No text node found, create one at the beginning
+            textNode = document.createTextNode(newText);
+            if (element.firstChild) {
+                element.insertBefore(textNode, element.firstChild);
+            }
+            else {
+                element.appendChild(textNode);
+            }
+        }
+    }
+    catch (error) {
+        console.error('Error updating text content:', error);
     }
 }

@@ -77,36 +77,54 @@ document.addEventListener('DOMContentLoaded', () => {
   async function ensureContentScriptLoaded(tabId: number): Promise<void> {
     try {
       // Check if we can communicate with the content script
-      await new Promise<void>((resolve, reject) => {
+      const isLoaded = await new Promise<boolean>((resolve) => {
+        // Set a timeout in case the message never gets a response
+        const timeout = setTimeout(() => {
+          console.log('Content script ping timed out, assuming not loaded');
+          resolve(false);
+        }, 300);
+        
         chrome.tabs.sendMessage(tabId, { action: 'ping' }, response => {
-          // If we get a lastError, it likely means the content script isn't loaded
+          clearTimeout(timeout);
+          
           if (chrome.runtime.lastError) {
-            console.log('Content script not loaded, injecting it now...');
-            // Inject CSS first
-            chrome.scripting.insertCSS({
-              target: { tabId },
-              files: ['dist/content/styles.css']
-            }).then(() => {
-              // Then inject JavaScript
-              return chrome.scripting.executeScript({
-                target: { tabId },
-                files: ['dist/content/inspector.js']
-              });
-            }).then(() => {
-              console.log('Successfully injected content script');
-              // Give it a moment to initialize
-              setTimeout(resolve, 100);
-            }).catch(error => {
-              console.error('Failed to inject content script:', error);
-              reject(error);
-            });
-          } else {
-            // Content script already loaded and responded
+            console.log('Content script not detected, will inject it');
+            resolve(false);
+          } else if (response && response.status === 'ok') {
             console.log('Content script already loaded');
-            resolve();
+            resolve(true);
+          } else {
+            console.log('Unexpected response, will inject content script');
+            resolve(false);
           }
         });
       });
+      
+      // If not loaded, inject the content script
+      if (!isLoaded) {
+        console.log('Injecting content script...');
+        try {
+          // Inject CSS first
+          await chrome.scripting.insertCSS({
+            target: { tabId },
+            files: ['dist/content/styles.css']
+          });
+          
+          // Then inject JavaScript
+          await chrome.scripting.executeScript({
+            target: { tabId },
+            files: ['dist/content/inspector.js']
+          });
+          
+          console.log('Content script injection successful');
+          
+          // Give it a moment to initialize
+          await new Promise(resolve => setTimeout(resolve, 100));
+        } catch (error) {
+          console.error('Failed to inject content script:', error);
+          throw new Error(`Content script injection failed: ${error}`);
+        }
+      }
     } catch (error) {
       console.error('Error ensuring content script is loaded:', error);
       throw new Error('Unable to inject inspector script');
@@ -146,17 +164,39 @@ document.addEventListener('DOMContentLoaded', () => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs: chrome.tabs.Tab[]) => {
       if (tabs[0]?.id) {
         try {
+          // Set a timeout to handle unresponsive content script
+          const messageTimeout = setTimeout(() => {
+            console.log('Message response timeout - this is normal for toggle operations');
+          }, 300);
+          
           chrome.tabs.sendMessage(tabs[0].id, message, response => {
+            clearTimeout(messageTimeout);
+            
             if (chrome.runtime.lastError) {
               // Use a more specific error message without logging the entire object
               const errorMessage = chrome.runtime.lastError.message || 'Unknown error';
-              console.error('Error sending message:', errorMessage);
               
-              // Only show a status message if it's not a connection-related error
-              // which is expected when the content script is not yet loaded
-              if (!errorMessage.includes('Could not establish connection')) {
+              // Common errors that shouldn't be treated as problems:
+              const expectedErrors = [
+                'Could not establish connection',
+                'The message port closed before a response was received',
+                'A listener indicated an asynchronous response'
+              ];
+              
+              const isExpectedError = expectedErrors.some(expected => 
+                errorMessage.includes(expected)
+              );
+              
+              if (!isExpectedError) {
+                console.error('Error sending message:', errorMessage);
                 showStatus('Connection error. Please refresh the page.');
+              } else {
+                console.log('Expected messaging behavior:', errorMessage);
               }
+            }
+            
+            if (response) {
+              console.log('Response received:', response);
             }
           });
         } catch (error) {
