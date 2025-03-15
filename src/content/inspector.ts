@@ -201,8 +201,11 @@ function showOverlay(
   elementData: ElementData, 
   event: MouseEvent
 ): void {
-  // Remove any existing overlay
-  removeOverlay();
+  // Remove any existing overlay first
+  if (activeOverlay && document.body.contains(activeOverlay)) {
+    document.body.removeChild(activeOverlay);
+    activeOverlay = null;
+  }
   
   // Create overlay container
   const overlay = document.createElement('div');
@@ -213,21 +216,58 @@ function showOverlay(
   header.className = 'drishti-overlay-header';
   
   const title = document.createElement('h3');
-  title.textContent = 'Element Inspector';
+  title.textContent = 'Element Inspector (Press ESC to close)';
   
   const closeButton = document.createElement('button');
   closeButton.className = 'drishti-overlay-close';
   closeButton.textContent = '×';
   closeButton.type = 'button';
   
-  // Fix: Make sure the close button works by using a direct function reference
-  closeButton.addEventListener('click', () => {
-    removeOverlay();
-  }, false);
+  // Simplified close button handler
+  closeButton.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // Remove overlay
+    if (document.body.contains(overlay)) {
+      document.body.removeChild(overlay);
+      activeOverlay = null;
+    }
+    
+    // Cleanup inspected element
+    if (inspectedElement) {
+      inspectedElement.classList.remove('drishti-element-highlight');
+      inspectedElement = null;
+    }
+    
+    // Keep inspector mode active
+    inspectorActive = true;
+  });
   
   header.appendChild(title);
   header.appendChild(closeButton);
   overlay.appendChild(header);
+  
+  // Add ESC key listener for closing
+  const handleKeyPress = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      if (document.body.contains(overlay)) {
+        document.body.removeChild(overlay);
+        activeOverlay = null;
+        
+        // Cleanup inspected element
+        if (inspectedElement) {
+          inspectedElement.classList.remove('drishti-element-highlight');
+          inspectedElement = null;
+        }
+        
+        // Remove the event listener
+        document.removeEventListener('keydown', handleKeyPress);
+      }
+    }
+  };
+  
+  document.addEventListener('keydown', handleKeyPress);
   
   // Add body
   const body = document.createElement('div');
@@ -331,37 +371,46 @@ function showOverlay(
   }
   
   // Classes with edit option
-  if (elementData.classList.length > 0) {
-    const classSection = document.createElement('div');
-    classSection.className = 'drishti-element-property';
+  const classSection = document.createElement('div');
+  classSection.className = 'drishti-element-property';
+  
+  const classLabel = document.createElement('strong');
+  classLabel.textContent = 'Classes: ';
+  classLabel.style.marginRight = '8px';
+  
+  const classInput = document.createElement('input');
+  classInput.type = 'text';
+  classInput.value = elementData.classList.join(' ');
+  classInput.className = 'drishti-element-input';
+  
+  // Improved class editing
+  classInput.addEventListener('change', () => {
+    if (!inspectedElement) return;
     
-    const classLabel = document.createElement('strong');
-    classLabel.textContent = 'Classes: ';
-    classLabel.style.marginRight = '8px';
+    const newClasses = classInput.value.split(' ')
+      .map(c => c.trim())
+      .filter(c => c !== '' && c !== 'drishti-element-highlight');
     
-    const classInput = document.createElement('input');
-    classInput.type = 'text';
-    classInput.value = elementData.classList.join(' ');
-    classInput.className = 'drishti-element-input';
-    classInput.addEventListener('change', () => {
-      if (inspectedElement) {
-        // Remove all existing classes
-        elementData.classList.forEach(cls => {
-          inspectedElement?.classList.remove(cls);
-        });
-        
-        // Add new classes
-        const newClasses = classInput.value.split(' ').filter(c => c.trim() !== '');
-        newClasses.forEach(cls => {
-          inspectedElement?.classList.add(cls);
-        });
-      }
+    // Store current highlight state
+    const wasHighlighted = inspectedElement.classList.contains('drishti-element-highlight');
+    
+    // Remove all existing classes
+    inspectedElement.className = '';
+    
+    // Add new classes
+    newClasses.forEach(cls => {
+      inspectedElement?.classList.add(cls);
     });
     
-    classSection.appendChild(classLabel);
-    classSection.appendChild(classInput);
-    tagDisplay.appendChild(classSection);
-  }
+    // Restore highlight if it was present
+    if (wasHighlighted) {
+      inspectedElement.classList.add('drishti-element-highlight');
+    }
+  });
+  
+  classSection.appendChild(classLabel);
+  classSection.appendChild(classInput);
+  tagDisplay.appendChild(classSection);
   
   // Original tag format for reference (read-only)
   const originalTag = document.createElement('div');
@@ -451,74 +500,136 @@ function showOverlay(
     label.textContent = prop + ':';
     
     const input = document.createElement('input');
-    input.type = 'text';
-    input.value = elementData.computedStyles[prop] || '';
+    input.type = prop.includes('color') ? 'color' : 'text';
+    input.value = prop.includes('color') ? 
+      rgbaToHex(elementData.computedStyles[prop]) : 
+      elementData.computedStyles[prop] || '';
     input.dataset.property = prop;
     
-    // For color properties, add a color indicator
+    // For color properties, create a simple color palette
     if (prop === 'color' || prop === 'background-color') {
-      // Add a small color swatch before the input
-      const colorValue = elementData.computedStyles[prop];
-      if (colorValue && colorValue !== 'transparent' && colorValue !== 'rgba(0, 0, 0, 0)') {
-        const colorSwatch = document.createElement('span');
-        colorSwatch.style.position = 'absolute';
-        colorSwatch.style.width = '16px';
-        colorSwatch.style.height = '16px';
-        colorSwatch.style.backgroundColor = colorValue;
-        colorSwatch.style.borderRadius = '3px';
-        colorSwatch.style.left = '10px';
-        colorSwatch.style.top = '50%';
-        colorSwatch.style.transform = 'translateY(-50%)';
-        colorSwatch.style.border = '1px solid rgba(0,0,0,0.1)';
-        
-        // Wrap input in a container for positioning
-        const inputWrapper = document.createElement('div');
-        inputWrapper.style.position = 'relative';
-        inputWrapper.style.flex = '1';
-        inputWrapper.appendChild(colorSwatch);
-        inputWrapper.appendChild(input);
-        
-        propContainer.appendChild(label);
-        propContainer.appendChild(inputWrapper);
-      } else {
-        propContainer.appendChild(label);
-        propContainer.appendChild(input);
-      }
-    } else {
-      propContainer.appendChild(label);
-      propContainer.appendChild(input);
-    }
-    
-    // Always add the property container to the CSS editor
-    cssEditor.appendChild(propContainer);
-    
-    // Update CSS on input with debouncing for better performance
-    let debounceTimeout: number | null = null;
-    input.addEventListener('input', () => {
-      if (debounceTimeout) {
-        clearTimeout(debounceTimeout);
-      }
+      const colorSection = document.createElement('div');
+      colorSection.style.marginTop = '5px';
       
-      debounceTimeout = setTimeout(() => {
+      // Add text input for manual color entry
+      const textInput = document.createElement('input');
+      textInput.type = 'text';
+      textInput.value = elementData.computedStyles[prop];
+      textInput.className = 'drishti-color-text-input';
+      textInput.style.width = '100%';
+      textInput.style.marginBottom = '8px';
+      textInput.style.padding = '8px';
+      textInput.style.border = '1px solid #ccc';
+      textInput.style.borderRadius = '4px';
+      textInput.style.backgroundColor = '#ffffff';
+      textInput.style.color = '#333333';
+      textInput.placeholder = 'Enter color (e.g., #ff0000)';
+      
+      // Create color palette
+      const paletteContainer = document.createElement('div');
+      paletteContainer.style.display = 'flex';
+      paletteContainer.style.flexWrap = 'wrap';
+      paletteContainer.style.gap = '6px';
+      paletteContainer.style.marginTop = '8px';
+      
+      // Common colors for the palette
+      const colorPalette = [
+        '#000000', '#ffffff', '#ff0000', '#00ff00', '#0000ff',
+        '#ffff00', '#00ffff', '#ff00ff', '#c0c0c0', '#808080',
+        '#800000', '#808000', '#008000', '#800080', '#008080',
+        '#000080', '#ff8080', '#80ff80', '#8080ff', '#ffa500'
+      ];
+      
+      // Current color indicator
+      const currentColor = document.createElement('div');
+      currentColor.textContent = 'Current color:';
+      currentColor.style.fontSize = '12px';
+      currentColor.style.marginBottom = '4px';
+      currentColor.style.fontWeight = 'bold';
+      
+      const colorPreview = document.createElement('div');
+      colorPreview.style.width = '100%';
+      colorPreview.style.height = '24px';
+      colorPreview.style.backgroundColor = elementData.computedStyles[prop];
+      colorPreview.style.border = '1px solid #ccc';
+      colorPreview.style.borderRadius = '4px';
+      colorPreview.style.marginBottom = '8px';
+      
+      // Create color swatches
+      colorPalette.forEach(color => {
+        const swatch = document.createElement('div');
+        swatch.style.width = '24px';
+        swatch.style.height = '24px';
+        swatch.style.backgroundColor = color;
+        swatch.style.border = '1px solid #ccc';
+        swatch.style.borderRadius = '4px';
+        swatch.style.cursor = 'pointer';
+        swatch.title = color;
+        
+        // Add click handler to apply color
+        swatch.addEventListener('click', () => {
+          if (inspectedElement) {
+            // Apply color to element
+            inspectedElement.style.setProperty(prop, color);
+            
+            // Update UI
+            textInput.value = color;
+            colorPreview.style.backgroundColor = color;
+          }
+        });
+        
+        paletteContainer.appendChild(swatch);
+      });
+      
+      // Text input change handler
+      textInput.addEventListener('input', () => {
         if (inspectedElement) {
           try {
-            // Update the element style
-            inspectedElement.style.setProperty(prop, input.value);
+            const newColor = textInput.value;
+            inspectedElement.style.setProperty(prop, newColor);
             
-            // For color properties, update the color swatch
-            if ((prop === 'color' || prop === 'background-color') && 
-                input.parentElement?.querySelector('span')) {
-              const colorSwatch = input.parentElement.querySelector('span');
-              if (colorSwatch) {
-                colorSwatch.style.backgroundColor = input.value;
-              }
+            if (isValidColor(newColor)) {
+              colorPreview.style.backgroundColor = newColor;
             }
           } catch (error) {
             console.error(`Failed to set ${prop}:`, error);
           }
         }
-      }, 150); // Small delay for smoother experience
-    });
+      });
+      
+      colorSection.appendChild(currentColor);
+      colorSection.appendChild(colorPreview);
+      colorSection.appendChild(textInput);
+      colorSection.appendChild(paletteContainer);
+      
+      propContainer.appendChild(label);
+      propContainer.appendChild(colorSection);
+    } else {
+      propContainer.appendChild(label);
+      
+      // Regular text input with improved styling
+      input.style.width = '100%';
+      input.style.padding = '8px';
+      input.style.border = '1px solid #ccc';
+      input.style.borderRadius = '4px';
+      input.style.backgroundColor = '#ffffff';
+      input.style.color = '#333333';
+      
+      // Regular text input for other properties
+      input.addEventListener('input', () => {
+        if (inspectedElement) {
+          try {
+            inspectedElement.style.setProperty(prop, input.value);
+          } catch (error) {
+            console.error(`Failed to set ${prop}:`, error);
+          }
+        }
+      });
+      
+      propContainer.appendChild(input);
+    }
+    
+    cssEditor.appendChild(propContainer);
   });
   
   body.appendChild(cssEditor);
@@ -765,4 +876,34 @@ function updateElementTextContent(element: HTMLElement, newText: string): void {
   } catch (error) {
     console.error('Error updating text content:', error);
   }
+}
+
+// Add helper functions at the end of the file
+function rgbaToHex(rgba: string): string {
+  // Default to black if invalid color
+  if (!rgba || rgba === 'transparent' || rgba === 'rgba(0, 0, 0, 0)') {
+    return '#000000';
+  }
+  
+  // Handle different color formats
+  if (rgba.startsWith('#')) {
+    return rgba;
+  }
+  
+  // Convert rgb/rgba to hex
+  const rgbaMatch = rgba.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+  if (rgbaMatch) {
+    const r = parseInt(rgbaMatch[1]);
+    const g = parseInt(rgbaMatch[2]);
+    const b = parseInt(rgbaMatch[3]);
+    return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
+  }
+  
+  return '#000000';
+}
+
+function isValidColor(color: string): boolean {
+  const testElement = document.createElement('div');
+  testElement.style.color = color;
+  return testElement.style.color !== '';
 } 
