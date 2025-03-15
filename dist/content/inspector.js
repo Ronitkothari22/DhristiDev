@@ -30,6 +30,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // Respond to ping to indicate content script is loaded
         sendResponse({ status: 'ok' });
     }
+    else if (message.action === 'getWindowDimensions') {
+        // Return the current window dimensions for responsive preview positioning
+        sendResponse({
+            width: window.innerWidth,
+            height: window.innerHeight
+        });
+    }
+    else if (message.action === 'pingResponsive') {
+        // When responsive.js is loaded, it will handle this message
+        // If this runs first, we simply don't acknowledge being responsive-ready
+        sendResponse({ inspector: 'ok' });
+    }
     // Return false since we're handling responses synchronously
     return false;
 });
