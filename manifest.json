@@ -22,7 +22,7 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["dist/content/inspector.js", "dist/content/responsive.js"],
+      "js": ["dist/content/inspector.js", "dist/content/responsive.js", "dist/content/network.js"],
       "css": ["dist/content/styles.css"]
     }
   ],

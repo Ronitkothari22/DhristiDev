@@ -21,28 +21,33 @@ let inspectedElement = null;
 let inspectorActive = false;
 // Listen for messages from the popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    // General ping to check if script is loaded
+    if (message.action === 'ping') {
+        // Respond to ping to indicate content script is loaded
+        sendResponse({ status: 'alive' });
+        return true;
+    }
+    // Specific ping to check if inspector script is loaded
+    if (message.action === 'ping_inspector') {
+        sendResponse({ status: 'inspector_alive' });
+        return true;
+    }
+    // Handle inspector-specific messages
     if (message.action === 'toggleInspector') {
         toggleInspectorMode(message.enabled);
         // Immediately send a response to prevent channel closed error
         sendResponse({ success: true });
+        return true;
     }
-    else if (message.action === 'ping') {
-        // Respond to ping to indicate content script is loaded
-        sendResponse({ status: 'ok' });
-    }
-    else if (message.action === 'getWindowDimensions') {
+    if (message.action === 'getWindowDimensions') {
         // Return the current window dimensions for responsive preview positioning
         sendResponse({
             width: window.innerWidth,
             height: window.innerHeight
         });
+        return true;
     }
-    else if (message.action === 'pingResponsive') {
-        // When responsive.js is loaded, it will handle this message
-        // If this runs first, we simply don't acknowledge being responsive-ready
-        sendResponse({ inspector: 'ok' });
-    }
-    // Return false since we're handling responses synchronously
+    // Ignore other messages that aren't for this script
     return false;
 });
 /**

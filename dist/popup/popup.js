@@ -18,16 +18,21 @@ document.addEventListener('DOMContentLoaded', () => {
     // Element section containers
     const inspectorSection = inspectorToggle.closest('.tool-section');
     const responsiveSection = responsiveToggle.closest('.tool-section');
+    const networkSection = networkToggle.closest('.tool-section');
     // Track feature states
     let inspectorActive = false;
     let responsiveActive = false;
+    let networkActive = false;
     // Initialize UI based on any previously stored state
-    chrome.storage.local.get(['inspectorActive', 'responsiveActive'], (result) => {
+    chrome.storage.local.get(['inspectorActive', 'responsiveActive', 'networkActive'], (result) => {
         if (result.inspectorActive) {
             activateInspector(true);
         }
         if (result.responsiveActive) {
             activateResponsive(true);
+        }
+        if (result.networkActive) {
+            activateNetwork(true);
         }
     });
     // Enable the responsive button that was previously disabled
@@ -103,6 +108,40 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }));
     });
+    // Network toggle click handler
+    networkToggle.addEventListener('click', () => {
+        // Toggle state
+        networkActive = !networkActive;
+        // Update UI
+        activateNetwork(networkActive);
+        // Save state
+        chrome.storage.local.set({ networkActive });
+        // Query the active tab
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => __awaiter(void 0, void 0, void 0, function* () {
+            const currentTab = tabs[0];
+            if (!(currentTab === null || currentTab === void 0 ? void 0 : currentTab.id)) {
+                showStatus('Error: No active tab found');
+                return;
+            }
+            try {
+                // Ensure both content script and network script are loaded
+                yield ensureContentScriptLoaded(currentTab.id);
+                yield ensureNetworkScriptLoaded(currentTab.id);
+                // Send the toggle message
+                sendMessageToActiveTab({
+                    action: 'toggleNetwork',
+                    enabled: networkActive
+                });
+                if (networkActive) {
+                    console.log('Network monitoring enabled');
+                }
+            }
+            catch (error) {
+                console.error('Error with content script:', error);
+                showStatus('Error: Cannot access page. Try refreshing.');
+            }
+        }));
+    });
     // Helper function to ensure content script is loaded
     function ensureContentScriptLoaded(tabId) {
         return __awaiter(this, void 0, void 0, function* () {
@@ -117,216 +156,189 @@ document.addEventListener('DOMContentLoaded', () => {
                     chrome.tabs.sendMessage(tabId, { action: 'ping' }, response => {
                         clearTimeout(timeout);
                         if (chrome.runtime.lastError) {
-                            console.log('Content script not detected, will inject it');
+                            console.log('Error pinging content script:', chrome.runtime.lastError);
                             resolve(false);
+                            return;
                         }
-                        else if (response && response.status === 'ok') {
-                            console.log('Content script already loaded');
+                        if ((response === null || response === void 0 ? void 0 : response.status) === 'alive') {
                             resolve(true);
                         }
                         else {
-                            console.log('Unexpected response, will inject content script');
                             resolve(false);
                         }
                     });
                 });
-                // If not loaded, inject the content script
                 if (!isLoaded) {
-                    console.log('Injecting content script...');
-                    try {
-                        // Inject CSS first
-                        yield chrome.scripting.insertCSS({
-                            target: { tabId },
-                            files: ['dist/content/styles.css']
-                        });
-                        // Then inject JavaScript
-                        yield chrome.scripting.executeScript({
-                            target: { tabId },
-                            files: ['dist/content/inspector.js']
-                        });
-                        console.log('Content script injection successful');
-                        // Give it a moment to initialize
-                        yield new Promise(resolve => setTimeout(resolve, 100));
-                    }
-                    catch (error) {
-                        console.error('Failed to inject content script:', error);
-                        throw new Error(`Content script injection failed: ${error}`);
-                    }
+                    console.log('Content script not loaded, injecting...');
+                    // Inject the content script
+                    yield chrome.scripting.executeScript({
+                        target: { tabId },
+                        files: ['dist/content/inspector.js']
+                    });
+                    console.log('Content script injected');
                 }
             }
             catch (error) {
-                console.error('Error ensuring content script is loaded:', error);
-                throw new Error('Unable to inject inspector script');
+                console.error('Error ensuring content script loaded:', error);
+                throw error;
             }
         });
     }
-    // Helper function to ensure responsive script is loaded
     function ensureResponsiveScriptLoaded(tabId) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
-                console.log('Ensuring responsive script is loaded for tab:', tabId);
-                // Check if the content script is already loaded (inspector.js)
-                yield ensureContentScriptLoaded(tabId);
-                // Check if we can communicate with the responsive script
-                const isLoaded = yield new Promise((resolve) => {
-                    // Set a timeout in case the message never gets a response
+                // The responsive.js is already included via manifest.json content_scripts,
+                // but we may need to explicitly inject it if for some reason it's not loaded
+                // This is a fallback mechanism
+                // Try to send a ping to check if responsive functionality exists
+                const isResponsiveAvailable = yield new Promise((resolve) => {
                     const timeout = setTimeout(() => {
-                        console.log('Responsive script ping timed out, assuming not loaded');
                         resolve(false);
                     }, 300);
-                    chrome.tabs.sendMessage(tabId, { action: 'pingResponsive' }, response => {
+                    chrome.tabs.sendMessage(tabId, { action: 'ping_responsive' }, response => {
                         clearTimeout(timeout);
                         if (chrome.runtime.lastError) {
-                            console.log('Responsive script not detected, will inject it. Error:', chrome.runtime.lastError);
                             resolve(false);
+                            return;
                         }
-                        else if (response && response.responsive === 'ok') {
-                            console.log('Responsive script already loaded');
+                        if ((response === null || response === void 0 ? void 0 : response.status) === 'responsive_alive') {
                             resolve(true);
                         }
                         else {
-                            console.log('Unexpected response, will inject responsive script. Response:', response);
                             resolve(false);
                         }
                     });
                 });
-                // If not loaded and not declared in manifest (which it now is), inject the responsive script
-                if (!isLoaded) {
-                    console.log('Responsive script is now included in manifest.json, skipping dynamic injection');
-                    /*
-                    // This code is commented out to prevent duplicate loading since responsive.js is in manifest.json
-                    console.log('Injecting responsive script...');
-                    try {
-                      // Then inject JavaScript (using content styles.css already loaded)
-                      await chrome.scripting.executeScript({
+                if (!isResponsiveAvailable) {
+                    console.log('Responsive script not detected, injecting...');
+                    // Inject the responsive script
+                    yield chrome.scripting.executeScript({
                         target: { tabId },
                         files: ['dist/content/responsive.js']
-                      });
-                      
-                      console.log('Responsive script injection successful');
-                      
-                      // Verify the responsive script was loaded successfully
-                      const verifyLoad = await new Promise<boolean>((resolve) => {
-                        const verifyTimeout = setTimeout(() => {
-                          console.log('Verification timed out');
-                          resolve(false);
-                        }, 300);
-                        
-                        chrome.tabs.sendMessage(tabId, { action: 'pingResponsive' }, response => {
-                          clearTimeout(verifyTimeout);
-                          if (response && response.responsive === 'ok') {
-                            console.log('Responsive script verified loaded');
-                            resolve(true);
-                          } else {
-                            console.log('Responsive script verification failed, response:', response);
-                            resolve(false);
-                          }
-                        });
-                      });
-                      
-                      if (!verifyLoad) {
-                        console.error('Responsive script verification failed');
-                        throw new Error('Responsive script failed to load properly');
-                      }
-                      
-                      // Give it a moment to initialize
-                      await new Promise(resolve => setTimeout(resolve, 100));
-                    } catch (error) {
-                      console.error('Failed to inject responsive script:', error);
-                      throw new Error(`Responsive script injection failed: ${error}`);
-                    }
-                    */
+                    });
+                    console.log('Responsive script injected');
                 }
             }
             catch (error) {
-                console.error('Error ensuring responsive script is loaded:', error);
-                throw new Error('Unable to inject responsive script');
+                console.error('Error ensuring responsive script loaded:', error);
+                throw error;
             }
         });
     }
-    // Helper function to show status
-    function showStatus(message) {
-        if (statusDisplay) {
-            statusDisplay.textContent = message;
-            statusDisplay.style.display = 'inline';
-            setTimeout(() => {
-                statusDisplay.style.display = 'none';
-            }, 3000);
-        }
+    function ensureNetworkScriptLoaded(tabId) {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                // The network.js is included via manifest.json content_scripts,
+                // but we may need to explicitly inject it if for some reason it's not loaded
+                // Try to send a ping to check if network functionality exists
+                const isNetworkAvailable = yield new Promise((resolve) => {
+                    const timeout = setTimeout(() => {
+                        resolve(false);
+                    }, 300);
+                    chrome.tabs.sendMessage(tabId, { action: 'ping_network' }, response => {
+                        clearTimeout(timeout);
+                        if (chrome.runtime.lastError) {
+                            resolve(false);
+                            return;
+                        }
+                        if ((response === null || response === void 0 ? void 0 : response.status) === 'network_alive') {
+                            resolve(true);
+                        }
+                        else {
+                            resolve(false);
+                        }
+                    });
+                });
+                if (!isNetworkAvailable) {
+                    console.log('Network script not detected, injecting...');
+                    // Inject the network script
+                    yield chrome.scripting.executeScript({
+                        target: { tabId },
+                        files: ['dist/content/network.js']
+                    });
+                    console.log('Network script injected');
+                }
+            }
+            catch (error) {
+                console.error('Error ensuring network script loaded:', error);
+                throw error;
+            }
+        });
     }
-    // Helper function to activate/deactivate inspector in UI
+    // Helper function to show status messages
+    function showStatus(message) {
+        statusDisplay.textContent = message;
+        // Clear the message after 3 seconds
+        setTimeout(() => {
+            statusDisplay.textContent = '';
+        }, 3000);
+    }
+    // Helper function to update UI for inspector toggle
     function activateInspector(active) {
+        inspectorActive = active;
         if (active) {
             inspectorToggle.textContent = 'Disable Inspector';
             inspectorToggle.classList.add('active');
             if (inspectorSection) {
-                inspectorSection.classList.add('active');
+                inspectorSection.classList.add('active-tool');
             }
         }
         else {
             inspectorToggle.textContent = 'Enable Inspector';
             inspectorToggle.classList.remove('active');
             if (inspectorSection) {
-                inspectorSection.classList.remove('active');
+                inspectorSection.classList.remove('active-tool');
             }
         }
     }
-    // Helper function to activate/deactivate responsive preview in UI
+    // Helper function to update UI for responsive toggle
     function activateResponsive(active) {
+        responsiveActive = active;
         if (active) {
             responsiveToggle.textContent = 'Disable Responsive';
             responsiveToggle.classList.add('active');
             if (responsiveSection) {
-                responsiveSection.classList.add('active');
+                responsiveSection.classList.add('active-tool');
             }
         }
         else {
             responsiveToggle.textContent = 'Enable Responsive';
             responsiveToggle.classList.remove('active');
             if (responsiveSection) {
-                responsiveSection.classList.remove('active');
+                responsiveSection.classList.remove('active-tool');
             }
         }
     }
-    // Helper function to send messages to the active tab
+    // Helper function to update UI for network toggle
+    function activateNetwork(active) {
+        networkActive = active;
+        if (active) {
+            networkToggle.textContent = 'Disable Network';
+            networkToggle.classList.add('active');
+            if (networkSection) {
+                networkSection.classList.add('active-tool');
+            }
+        }
+        else {
+            networkToggle.textContent = 'Enable Network';
+            networkToggle.classList.remove('active');
+            if (networkSection) {
+                networkSection.classList.remove('active-tool');
+            }
+        }
+    }
+    // Helper function to send a message to the active tab
     function sendMessageToActiveTab(message) {
         chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
             var _a;
             if ((_a = tabs[0]) === null || _a === void 0 ? void 0 : _a.id) {
-                try {
-                    // Set a timeout to handle unresponsive content script
-                    const messageTimeout = setTimeout(() => {
-                        console.log('Message response timeout - this is normal for toggle operations');
-                    }, 300);
-                    chrome.tabs.sendMessage(tabs[0].id, message, response => {
-                        clearTimeout(messageTimeout);
-                        if (chrome.runtime.lastError) {
-                            // Use a more specific error message without logging the entire object
-                            const errorMessage = chrome.runtime.lastError.message || 'Unknown error';
-                            // Common errors that shouldn't be treated as problems:
-                            const expectedErrors = [
-                                'Could not establish connection',
-                                'The message port closed before a response was received',
-                                'A listener indicated an asynchronous response'
-                            ];
-                            const isExpectedError = expectedErrors.some(expected => errorMessage.includes(expected));
-                            if (!isExpectedError) {
-                                console.error('Error sending message:', errorMessage);
-                                showStatus('Connection error. Please refresh the page.');
-                            }
-                            else {
-                                console.log('Expected messaging behavior:', errorMessage);
-                            }
-                        }
-                        if (response) {
-                            console.log('Response received:', response);
-                        }
-                    });
-                }
-                catch (error) {
-                    console.error('Error sending message to tab:', error);
-                    showStatus('Failed to communicate with page.');
-                }
+                chrome.tabs.sendMessage(tabs[0].id, message, response => {
+                    if (chrome.runtime.lastError) {
+                        console.error('Error sending message:', chrome.runtime.lastError);
+                        return;
+                    }
+                    console.log('Message sent successfully:', response);
+                });
             }
         });
     }

@@ -51,27 +51,47 @@ let customViewports: CustomViewport[] = [];
 chrome.runtime.onMessage.addListener((message: any, sender, sendResponse) => {
   console.log('Responsive script received message:', message);
   
+  // General ping to check if script is loaded
+  if (message.action === 'ping') {
+    sendResponse({ status: 'alive' });
+    return true;
+  }
+  
+  // Specific ping to check if responsive script is loaded
+  if (message.action === 'ping_responsive') {
+    sendResponse({ status: 'responsive_alive' });
+    return true;
+  }
+  
+  // Handle responsive-specific messages
   if (message.action === 'toggleResponsive') {
     console.log('Toggle responsive mode:', message.enabled);
-    // Handle toggle immediately without any delay
     toggleResponsiveMode(message.enabled);
-    // Send response after toggle
     sendResponse({ success: true });
-  } else if (message.action === 'setCustomViewport') {
+    return true;
+  } 
+  
+  if (message.action === 'setCustomViewport') {
     addCustomViewport(message.width, message.height);
     sendResponse({ success: true });
-  } else if (message.action === 'showViewportPreview') {
+    return true;
+  } 
+  
+  if (message.action === 'showViewportPreview') {
     console.log('Show viewport preview at:', message.clientX, message.clientY);
     showResponsivePreview(message.clientX, message.clientY);
     sendResponse({ success: true });
-  } else if (message.action === 'pingResponsive') {
+    return true;
+  } 
+  
+  if (message.action === 'pingResponsive') {
     console.log('Ping responsive received');
     sendResponse({ responsive: 'ok' });
-  } else if (message.action === 'ping') {
-    sendResponse({ status: 'ok' });
+    return true;
   }
   
-  return true; // Keep the message channel open for async response
+  // Ignore other messages like network messages
+  return false;
 });
 
 /**
