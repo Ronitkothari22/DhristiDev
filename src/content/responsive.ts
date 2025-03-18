@@ -20,6 +20,15 @@ interface CustomViewport {
   height: number;
 }
 
+// Interface for DOM element references
+interface DOMElements {
+  previewContainer: HTMLDivElement;
+  viewportContainer: HTMLDivElement;
+  iframe: HTMLIFrameElement;
+  frameContainer: HTMLDivElement;
+  dimensionDisplay: HTMLDivElement;
+}
+
 // Store predefined device viewports
 const DEVICE_VIEWPORTS: DeviceViewport[] = [
   { name: 'iPhone SE', width: 375, height: 667, devicePixelRatio: 2 },
@@ -360,7 +369,7 @@ function showResponsivePreview(clientX: number, clientY: number): void {
       if (device.name.includes('iPhone')) deviceType = 'iPhone';
       if (device.name.includes('iPad')) deviceType = 'iPad';
       
-      updateViewport(device.width, device.height, deviceType);
+      updateViewport(device.width, device.height, deviceType, elements);
       
       // Mark this button as active and others as inactive
       const allButtons = deviceButtonsGroup.querySelectorAll('button');
@@ -514,7 +523,7 @@ function showResponsivePreview(clientX: number, clientY: number): void {
     const width = parseInt(widthInput.value, 10);
     const height = parseInt(heightInput.value, 10);
     if (width > 0 && height > 0) {
-      updateViewport(width, height, 'custom');
+      updateViewport(width, height, 'custom', elements);
       addCustomViewport(width, height);
       
       // Clear active state from device buttons
@@ -630,6 +639,7 @@ function showResponsivePreview(clientX: number, clientY: number): void {
   
   // Add dimension display
   const dimensionDisplay = document.createElement('div');
+  dimensionDisplay.className = 'drishti-dimension-display';
   dimensionDisplay.style.position = 'absolute';
   dimensionDisplay.style.bottom = '15px';
   dimensionDisplay.style.left = '50%';
@@ -663,8 +673,17 @@ function showResponsivePreview(clientX: number, clientY: number): void {
   if (defaultDevice.name.includes('iPhone')) deviceType = 'iPhone';
   if (defaultDevice.name.includes('iPad')) deviceType = 'iPad';
   
+  // Store direct references to DOM elements needed for updates
+  const elements: DOMElements = {
+    previewContainer,
+    viewportContainer,
+    iframe,
+    frameContainer,
+    dimensionDisplay
+  };
+  
   // Set initial size with device frame
-  updateViewport(defaultDevice.width, defaultDevice.height, deviceType);
+  updateViewport(defaultDevice.width, defaultDevice.height, deviceType, elements);
   
   // Highlight the default device button
   setTimeout(() => {
@@ -692,128 +711,126 @@ function showResponsivePreview(clientX: number, clientY: number): void {
   activeViewportOverlay = backdrop;
   
   // Function to update viewport size and frame
-  function updateViewport(width: number, height: number, deviceType: string = 'custom'): void {
-    console.log(`Attempting to update viewport to ${width}x${height} with device type ${deviceType}`);
-    
-    // Find required elements with more specific selectors and proper typing
-    const previewContainer = document.querySelector('.drishti-responsive-overlay')?.querySelector('.drishti-preview-container') as HTMLDivElement | null;
-    const viewportContainer = previewContainer?.querySelector('.drishti-viewport-container') as HTMLDivElement | null;
-    const iframe = viewportContainer?.querySelector('iframe') as HTMLIFrameElement | null;
-    const frameContainer = viewportContainer?.querySelector('.drishti-frame-container') as HTMLDivElement | null;
-    const dimensionDisplay = previewContainer?.querySelector('.drishti-dimension-display') as HTMLDivElement | null;
-
-    // Check if all required elements exist
-    if (!previewContainer || !viewportContainer || !iframe || !frameContainer) {
-      console.error('Required elements not found for viewport update:', {
-        previewContainer: !!previewContainer,
-        viewportContainer: !!viewportContainer,
-        iframe: !!iframe,
-        frameContainer: !!frameContainer
-      });
-      return;
-    }
-
-    try {
-      // Update container style with improved scaling and containment
-      viewportContainer.style.width = `${width}px`;
-      viewportContainer.style.height = `${height}px`;
-      viewportContainer.style.maxWidth = '100%';
-      viewportContainer.style.maxHeight = 'calc(100vh - 200px)';
-      viewportContainer.style.transform = 'scale(1)';
-      viewportContainer.style.transformOrigin = 'center center';
-      viewportContainer.style.boxShadow = '0 4px 20px rgba(0, 0, 0, 0.15)';
-      viewportContainer.style.overflow = 'hidden';
+  function updateViewport(width: number, height: number, deviceType: string = 'custom', elements: DOMElements): void {
+    // Add a delay to ensure DOM elements are fully rendered
+    setTimeout(() => {
+      console.log(`Attempting to update viewport to ${width}x${height} with device type ${deviceType}`);
       
-      // Calculate and apply scaling if needed
-      const containerWidth = previewContainer.clientWidth - 60;
-      const containerHeight = previewContainer.clientHeight - 60;
-      const scaleX = containerWidth / width;
-      const scaleY = containerHeight / height;
-      const scale = Math.min(scaleX, scaleY, 1);
+      const { previewContainer, viewportContainer, iframe, frameContainer, dimensionDisplay } = elements;
       
-      if (scale < 1) {
-        viewportContainer.style.transform = `scale(${scale})`;
+      // Check if all required elements exist
+      if (!previewContainer || !viewportContainer || !iframe || !frameContainer) {
+        console.error('Required elements not found for viewport update:', {
+          previewContainer: !!previewContainer,
+          viewportContainer: !!viewportContainer,
+          iframe: !!iframe,
+          frameContainer: !!frameContainer
+        });
+        return;
       }
-      
-      // Update device frame with improved positioning and content containment
-      if (deviceFrames[deviceType]) {
-        frameContainer.innerHTML = deviceFrames[deviceType];
-        frameContainer.style.display = 'flex';
-        frameContainer.style.opacity = '1';
+
+      try {
+        // Force dimensions to be exactly as specified
+        viewportContainer.style.width = `${width}px`;
+        viewportContainer.style.height = `${height}px`;
+        viewportContainer.style.maxWidth = '100%';
+        viewportContainer.style.maxHeight = 'calc(100vh - 200px)';
+        viewportContainer.style.transform = 'scale(1)';
+        viewportContainer.style.transformOrigin = 'center center';
+        viewportContainer.style.boxShadow = '0 4px 20px rgba(0, 0, 0, 0.15)';
+        viewportContainer.style.overflow = 'hidden';
         
-        // Adjust iframe dimensions with proper padding and containment
-        if (deviceType === 'iPhone') {
-          iframe.style.width = 'calc(100% - 32px)';
-          iframe.style.height = 'calc(100% - 32px)';
-          iframe.style.margin = '16px';
-          iframe.style.borderRadius = '28px';
-          iframe.style.overflow = 'auto';
-          viewportContainer.style.padding = '0';
-        } else if (deviceType === 'iPad') {
-          iframe.style.width = 'calc(100% - 32px)';
-          iframe.style.height = 'calc(100% - 32px)';
-          iframe.style.margin = '16px';
-          iframe.style.borderRadius = '24px';
-          iframe.style.overflow = 'auto';
-          viewportContainer.style.padding = '0';
-        } else if (deviceType === 'Desktop') {
-          iframe.style.width = '100%';
-          iframe.style.height = 'calc(100% - 35px)';
-          iframe.style.margin = '35px 0 0 0';
-          iframe.style.borderRadius = '0';
-          iframe.style.overflow = 'auto';
-          viewportContainer.style.padding = '0';
+        // Calculate and apply scaling if needed
+        const containerWidth = previewContainer.clientWidth - 60;
+        const containerHeight = previewContainer.clientHeight - 60;
+        const scaleX = containerWidth / width;
+        const scaleY = containerHeight / height;
+        const scale = Math.min(scaleX, scaleY, 1);
+        
+        if (scale < 1) {
+          viewportContainer.style.transform = `scale(${scale})`;
         }
         
-        // Common iframe styles for device frames with improved containment
-        iframe.style.position = 'relative';
-        iframe.style.zIndex = '2';
-        iframe.style.background = '#ffffff';
-        iframe.style.boxSizing = 'border-box';
-        iframe.style.transform = 'translate3d(0,0,0)';
+        // Update device frame with improved positioning and content containment
+        if (deviceFrames[deviceType]) {
+          frameContainer.innerHTML = deviceFrames[deviceType];
+          frameContainer.style.display = 'flex';
+          frameContainer.style.opacity = '1';
+          
+          // Adjust iframe dimensions with proper padding and containment
+          if (deviceType === 'iPhone') {
+            iframe.style.width = 'calc(100% - 32px)';
+            iframe.style.height = 'calc(100% - 32px)';
+            iframe.style.margin = '16px';
+            iframe.style.borderRadius = '28px';
+            iframe.style.overflow = 'auto';
+            viewportContainer.style.padding = '0';
+          } else if (deviceType === 'iPad') {
+            iframe.style.width = 'calc(100% - 32px)';
+            iframe.style.height = 'calc(100% - 32px)';
+            iframe.style.margin = '16px';
+            iframe.style.borderRadius = '24px';
+            iframe.style.overflow = 'auto';
+            viewportContainer.style.padding = '0';
+          } else if (deviceType === 'Desktop') {
+            iframe.style.width = '100%';
+            iframe.style.height = 'calc(100% - 35px)';
+            iframe.style.margin = '35px 0 0 0';
+            iframe.style.borderRadius = '0';
+            iframe.style.overflow = 'auto';
+            viewportContainer.style.padding = '0';
+          }
+          
+          // Common iframe styles for device frames with improved containment
+          iframe.style.position = 'relative';
+          iframe.style.zIndex = '2';
+          iframe.style.background = '#ffffff';
+          iframe.style.boxSizing = 'border-box';
+          iframe.style.transform = 'translate3d(0,0,0)';
+          
+          // Reset container styles for device frames
+          viewportContainer.style.border = 'none';
+          viewportContainer.style.borderRadius = '0';
+          viewportContainer.style.overflow = 'hidden';
+        } else {
+          // Custom size styling with improved containment
+          frameContainer.innerHTML = '';
+          frameContainer.style.display = 'none';
+          
+          iframe.style.width = '100%';
+          iframe.style.height = '100%';
+          iframe.style.margin = '0';
+          iframe.style.borderRadius = '8px';
+          iframe.style.position = 'relative';
+          iframe.style.zIndex = '2';
+          iframe.style.overflow = 'auto';
+          iframe.style.transform = 'translate3d(0,0,0)';
+          
+          viewportContainer.style.border = '1px solid #ddd';
+          viewportContainer.style.borderRadius = '8px';
+          viewportContainer.style.padding = '0';
+          viewportContainer.style.overflow = 'hidden';
+        }
         
-        // Reset container styles for device frames
-        viewportContainer.style.border = 'none';
-        viewportContainer.style.borderRadius = '0';
-        viewportContainer.style.overflow = 'hidden';
-      } else {
-        // Custom size styling with improved containment
-        frameContainer.innerHTML = '';
-        frameContainer.style.display = 'none';
+        // Update dimension display with improved styling
+        if (dimensionDisplay) {
+          dimensionDisplay.textContent = `${width} × ${height}${deviceType !== 'custom' ? ` - ${deviceType}` : ''}`;
+          dimensionDisplay.style.opacity = '1';
+        }
         
-        iframe.style.width = '100%';
-        iframe.style.height = '100%';
-        iframe.style.margin = '0';
-        iframe.style.borderRadius = '8px';
-        iframe.style.position = 'relative';
-        iframe.style.zIndex = '2';
-        iframe.style.overflow = 'auto';
-        iframe.style.transform = 'translate3d(0,0,0)';
+        // Force a reflow and ensure proper containment
+        viewportContainer.offsetHeight;
         
-        viewportContainer.style.border = '1px solid #ddd';
-        viewportContainer.style.borderRadius = '8px';
-        viewportContainer.style.padding = '0';
-        viewportContainer.style.overflow = 'hidden';
+        // Add scroll event listener to handle content overflow
+        iframe.contentWindow?.addEventListener('scroll', () => {
+          iframe.style.pointerEvents = 'auto';
+        });
+        
+        console.log('Viewport updated successfully with content containment');
+      } catch (error) {
+        console.error('Error updating viewport:', error);
       }
-      
-      // Update dimension display with improved styling
-      if (dimensionDisplay) {
-        dimensionDisplay.textContent = `${width} × ${height}${deviceType !== 'custom' ? ` - ${deviceType}` : ''}`;
-        dimensionDisplay.style.opacity = '1';
-      }
-      
-      // Force a reflow and ensure proper containment
-      viewportContainer.offsetHeight;
-      
-      // Add scroll event listener to handle content overflow
-      iframe.contentWindow?.addEventListener('scroll', () => {
-        iframe.style.pointerEvents = 'auto';
-      });
-      
-      console.log('Viewport updated successfully with content containment');
-    } catch (error) {
-      console.error('Error updating viewport:', error);
-    }
+    }, 50); // 50ms delay to ensure DOM elements are ready
   }
 
   // Add responsive media queries for better mobile layout
