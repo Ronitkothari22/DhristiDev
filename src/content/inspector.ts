@@ -101,6 +101,30 @@ function toggleInspectorMode(enabled: boolean): void {
 }
 
 /**
+ * Temporarily pause inspector mode (for color picker interaction)
+ */
+function pauseInspectorMode(): void {
+  if (inspectorActive) {
+    // Remove event listeners but don't change inspectorActive flag
+    document.removeEventListener('click', handleElementClick, true);
+    document.removeEventListener('mouseover', handleElementMouseOver, true);
+    document.removeEventListener('mouseout', handleElementMouseOut, true);
+  }
+}
+
+/**
+ * Resume inspector mode after color picker interaction
+ */
+function resumeInspectorMode(): void {
+  if (inspectorActive) {
+    // Add event listeners back
+    document.addEventListener('click', handleElementClick, true);
+    document.addEventListener('mouseover', handleElementMouseOver, true);
+    document.addEventListener('mouseout', handleElementMouseOut, true);
+  }
+}
+
+/**
  * Handle element click in inspector mode
  */
 function handleElementClick(event: MouseEvent): void {
@@ -115,7 +139,9 @@ function handleElementClick(event: MouseEvent): void {
   let isOverlayClick = false;
   
   while (target && target !== document.body) {
-    if (target.classList.contains('drishti-overlay-container')) {
+    if (target.classList.contains('drishti-overlay-container') || 
+        target.classList.contains('drishti-color-picker') ||
+        target.classList.contains('drishti-color-swatch')) {
       isOverlayClick = true;
       break;
     }
@@ -123,7 +149,7 @@ function handleElementClick(event: MouseEvent): void {
   }
   
   if (isOverlayClick) {
-    return; // Don't process clicks inside the overlay
+    return; // Don't process clicks inside the overlay or on color pickers
   }
   
   // Get the clicked element
@@ -239,52 +265,41 @@ function showOverlay(
   const title = document.createElement('h3');
   title.textContent = 'Element Inspector (Press ESC to close)';
   
-  const closeButton = document.createElement('button');
-  closeButton.className = 'drishti-overlay-close';
-  closeButton.textContent = '×';
-  closeButton.type = 'button';
-  
-  // Simplified close button handler
-  closeButton.addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    
-    // Remove overlay
-    if (document.body.contains(overlay)) {
-      document.body.removeChild(overlay);
-      activeOverlay = null;
-    }
-    
-    // Cleanup inspected element
-    if (inspectedElement) {
-      inspectedElement.classList.remove('drishti-element-highlight');
-      inspectedElement = null;
-    }
-    
-    // Keep inspector mode active
-    inspectorActive = true;
-  });
-  
   header.appendChild(title);
-  header.appendChild(closeButton);
   overlay.appendChild(header);
   
-  // Add ESC key listener for closing
+  // Add ESC key listener for closing - using the same direct approach
   const handleKeyPress = (e: KeyboardEvent) => {
     if (e.key === 'Escape') {
+      // Remove overlay immediately
       if (document.body.contains(overlay)) {
         document.body.removeChild(overlay);
         activeOverlay = null;
-        
-        // Cleanup inspected element
-        if (inspectedElement) {
-          inspectedElement.classList.remove('drishti-element-highlight');
-          inspectedElement = null;
-        }
-        
-        // Remove the event listener
-        document.removeEventListener('keydown', handleKeyPress);
       }
+      
+      // Clean up any highlighted elements
+      if (inspectedElement) {
+        inspectedElement.classList.remove('drishti-element-highlight');
+        inspectedElement = null;
+      }
+      
+      // Remove all document event listeners directly
+      document.removeEventListener('click', handleElementClick, true);
+      document.removeEventListener('mouseover', handleElementMouseOver, true);
+      document.removeEventListener('mouseout', handleElementMouseOut, true);
+      document.removeEventListener('keydown', handleKeyPress);
+      
+      // Reset visual indicators
+      document.body.classList.remove('drishti-inspector-active');
+      
+      // Set inspector to inactive state
+      inspectorActive = false;
+      
+      // Notify background script that inspector is now inactive
+      chrome.runtime.sendMessage({
+        action: 'inspectorToggled',
+        enabled: false
+      });
     }
   };
   
@@ -532,96 +547,432 @@ function showOverlay(
       const colorSection = document.createElement('div');
       colorSection.style.marginTop = '5px';
       
-      // Add text input for manual color entry
-      const textInput = document.createElement('input');
-      textInput.type = 'text';
-      textInput.value = elementData.computedStyles[prop];
-      textInput.className = 'drishti-color-text-input';
-      textInput.style.width = '100%';
-      textInput.style.marginBottom = '8px';
-      textInput.style.padding = '8px';
-      textInput.style.border = '1px solid #ccc';
-      textInput.style.borderRadius = '4px';
-      textInput.style.backgroundColor = '#ffffff';
-      textInput.style.color = '#333333';
-      textInput.placeholder = 'Enter color (e.g., #ff0000)';
+      // Store the current element reference
+      const targetElement = element;
       
-      // Create color palette
-      const paletteContainer = document.createElement('div');
-      paletteContainer.style.display = 'flex';
-      paletteContainer.style.flexWrap = 'wrap';
-      paletteContainer.style.gap = '6px';
-      paletteContainer.style.marginTop = '8px';
-      
-      // Common colors for the palette
-      const colorPalette = [
-        '#000000', '#ffffff', '#ff0000', '#00ff00', '#0000ff',
-        '#ffff00', '#00ffff', '#ff00ff', '#c0c0c0', '#808080',
-        '#800000', '#808000', '#008000', '#800080', '#008080',
-        '#000080', '#ff8080', '#80ff80', '#8080ff', '#ffa500'
-      ];
-      
-      // Current color indicator
+      // Current color display
       const currentColor = document.createElement('div');
       currentColor.textContent = 'Current color:';
       currentColor.style.fontSize = '12px';
       currentColor.style.marginBottom = '4px';
       currentColor.style.fontWeight = 'bold';
       
+      // Color preview with larger height
       const colorPreview = document.createElement('div');
       colorPreview.style.width = '100%';
-      colorPreview.style.height = '24px';
+      colorPreview.style.height = '40px';
       colorPreview.style.backgroundColor = elementData.computedStyles[prop];
       colorPreview.style.border = '1px solid #ccc';
       colorPreview.style.borderRadius = '4px';
-      colorPreview.style.marginBottom = '8px';
+      colorPreview.style.marginBottom = '10px';
+      colorPreview.style.transition = 'background-color 0.2s';
       
-      // Create color swatches
-      colorPalette.forEach(color => {
-        const swatch = document.createElement('div');
-        swatch.style.width = '24px';
-        swatch.style.height = '24px';
-        swatch.style.backgroundColor = color;
-        swatch.style.border = '1px solid #ccc';
-        swatch.style.borderRadius = '4px';
-        swatch.style.cursor = 'pointer';
-        swatch.title = color;
-        
-        // Add click handler to apply color
-        swatch.addEventListener('click', () => {
-          if (inspectedElement) {
-            // Apply color to element
-            inspectedElement.style.setProperty(prop, color);
+      // Advanced color picker container
+      const pickerContainer = document.createElement('div');
+      pickerContainer.style.marginBottom = '15px';
+      pickerContainer.style.backgroundColor = '#222222';
+      pickerContainer.style.borderRadius = '4px';
+      pickerContainer.style.overflow = 'hidden';
+      pickerContainer.style.boxShadow = '0 2px 10px rgba(0,0,0,0.25)';
+      
+      // Parse the current color
+      let currentR = 0, currentG = 0, currentB = 0;
+      let currentHue = 0;
+      let currentSaturation = 100;
+      let currentLightness = 50;
+      
+      try {
+        const rgbColor = elementData.computedStyles[prop];
+        if (rgbColor) {
+          const rgbMatch = rgbColor.match(/^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/);
+          if (rgbMatch) {
+            currentR = parseInt(rgbMatch[1]);
+            currentG = parseInt(rgbMatch[2]);
+            currentB = parseInt(rgbMatch[3]);
             
-            // Update UI
-            textInput.value = color;
-            colorPreview.style.backgroundColor = color;
+            const r = currentR / 255;
+            const g = currentG / 255;
+            const b = currentB / 255;
+            
+            const max = Math.max(r, g, b);
+            const min = Math.min(r, g, b);
+            const delta = max - min;
+            
+            // Calculate lightness
+            currentLightness = Math.round((max + min) / 2 * 100);
+            
+            // Calculate saturation
+            if (delta === 0) {
+              currentSaturation = 0;
+            } else {
+              currentSaturation = Math.round((currentLightness > 50 ? delta / (2 - max - min) : delta / (max + min)) * 100);
+            }
+            
+            // Calculate hue
+            if (delta === 0) {
+              currentHue = 0;
+            } else if (max === r) {
+              currentHue = ((g - b) / delta + (g < b ? 6 : 0)) * 60;
+            } else if (max === g) {
+              currentHue = ((b - r) / delta + 2) * 60;
+            } else {
+              currentHue = ((r - g) / delta + 4) * 60;
+            }
+            
+            currentHue = Math.round(currentHue);
           }
-        });
+        }
+      } catch (e) {
+        console.error("Error extracting color values:", e);
+      }
+      
+      // Create the color square (2D saturation/brightness selector)
+      const colorSquare = document.createElement('div');
+      colorSquare.style.width = '200px';
+      colorSquare.style.height = '200px';
+      colorSquare.style.position = 'relative';
+      colorSquare.style.margin = '10px auto';
+      colorSquare.style.backgroundColor = `hsl(${currentHue}, 100%, 50%)`;
+      colorSquare.style.cursor = 'crosshair';
+      
+      // White gradient overlay (horizontal - saturation)
+      const whiteGradient = document.createElement('div');
+      whiteGradient.style.position = 'absolute';
+      whiteGradient.style.top = '0';
+      whiteGradient.style.left = '0';
+      whiteGradient.style.width = '100%';
+      whiteGradient.style.height = '100%';
+      whiteGradient.style.background = 'linear-gradient(to right, #fff, rgba(255,255,255,0))';
+      colorSquare.appendChild(whiteGradient);
+      
+      // Black gradient overlay (vertical - brightness)
+      const blackGradient = document.createElement('div');
+      blackGradient.style.position = 'absolute';
+      blackGradient.style.top = '0';
+      blackGradient.style.left = '0';
+      blackGradient.style.width = '100%';
+      blackGradient.style.height = '100%';
+      blackGradient.style.background = 'linear-gradient(to bottom, rgba(0,0,0,0), #000)';
+      colorSquare.appendChild(blackGradient);
+      
+      // Color picker cursor for the square
+      const colorCursor = document.createElement('div');
+      colorCursor.style.position = 'absolute';
+      colorCursor.style.width = '10px';
+      colorCursor.style.height = '10px';
+      colorCursor.style.border = '2px solid white';
+      colorCursor.style.borderRadius = '50%';
+      colorCursor.style.transform = 'translate(-6px, -6px)';
+      colorCursor.style.pointerEvents = 'none';
+      colorCursor.style.boxShadow = '0 0 0 1px black';
+      
+      // Set initial cursor position based on saturation and brightness
+      // This is an approximation as the exact conversion depends on the HSV/HSL model
+      colorCursor.style.left = `${currentSaturation * 2}px`;
+      colorCursor.style.top = `${(100 - currentLightness) * 2}px`;
+      
+      colorSquare.appendChild(colorCursor);
+      
+      // Add the hue slider
+      const hueSlider = document.createElement('div');
+      hueSlider.style.width = '200px';
+      hueSlider.style.height = '20px';
+      hueSlider.style.margin = '0 auto 10px';
+      hueSlider.style.position = 'relative';
+      hueSlider.style.background = 'linear-gradient(to right, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000)';
+      hueSlider.style.borderRadius = '10px';
+      hueSlider.style.cursor = 'pointer';
+      
+      // Hue slider thumb
+      const hueThumb = document.createElement('div');
+      hueThumb.style.position = 'absolute';
+      hueThumb.style.width = '6px';
+      hueThumb.style.height = '26px';
+      hueThumb.style.backgroundColor = 'white';
+      hueThumb.style.borderRadius = '3px';
+      hueThumb.style.border = '1px solid #333';
+      hueThumb.style.top = '-3px';
+      hueThumb.style.transform = 'translateX(-3px)';
+      hueThumb.style.pointerEvents = 'none';
+      
+      // Set initial thumb position based on hue
+      hueThumb.style.left = `${(currentHue / 360) * 200}px`;
+      
+      hueSlider.appendChild(hueThumb);
+      
+      // Color controls container
+      const controlsContainer = document.createElement('div');
+      controlsContainer.style.display = 'flex';
+      controlsContainer.style.flexWrap = 'wrap';
+      controlsContainer.style.justifyContent = 'space-between';
+      controlsContainer.style.padding = '10px';
+      controlsContainer.style.backgroundColor = '#333';
+      controlsContainer.style.color = '#fff';
+      
+      // RGB Inputs
+      const rgbContainer = document.createElement('div');
+      rgbContainer.style.display = 'flex';
+      rgbContainer.style.justifyContent = 'space-between';
+      rgbContainer.style.width = '100%';
+      rgbContainer.style.marginBottom = '10px';
+      
+      // Create RGB inputs
+      ['R', 'G', 'B'].forEach((label, index) => {
+        const channelContainer = document.createElement('div');
+        channelContainer.style.display = 'flex';
+        channelContainer.style.flexDirection = 'column';
+        channelContainer.style.width = '30%';
         
-        paletteContainer.appendChild(swatch);
+        const labelEl = document.createElement('label');
+        labelEl.textContent = label;
+        labelEl.style.fontSize = '12px';
+        labelEl.style.marginBottom = '3px';
+        
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.min = '0';
+        input.max = '255';
+        input.step = '1';
+        input.value = [currentR, currentG, currentB][index].toString();
+        input.style.width = '100%';
+        input.style.padding = '5px';
+        input.style.border = 'none';
+        input.style.borderRadius = '3px';
+        input.style.backgroundColor = '#444';
+        input.style.color = '#fff';
+        
+        channelContainer.appendChild(labelEl);
+        channelContainer.appendChild(input);
+        rgbContainer.appendChild(channelContainer);
       });
       
-      // Text input change handler
-      textInput.addEventListener('input', () => {
-        if (inspectedElement) {
-          try {
-            const newColor = textInput.value;
-            inspectedElement.style.setProperty(prop, newColor);
-            
-            if (isValidColor(newColor)) {
-              colorPreview.style.backgroundColor = newColor;
-            }
-          } catch (error) {
-            console.error(`Failed to set ${prop}:`, error);
+      // Hex input
+      const hexContainer = document.createElement('div');
+      hexContainer.style.display = 'flex';
+      hexContainer.style.flexDirection = 'column';
+      hexContainer.style.width = '100%';
+      
+      const hexLabel = document.createElement('label');
+      hexLabel.textContent = '#';
+      hexLabel.style.fontSize = '12px';
+      hexLabel.style.marginBottom = '3px';
+      
+      const hexInput = document.createElement('input');
+      hexInput.type = 'text';
+      hexInput.value = rgbToHex(currentR, currentG, currentB);
+      hexInput.style.width = '100%';
+      hexInput.style.padding = '5px';
+      hexInput.style.border = 'none';
+      hexInput.style.borderRadius = '3px';
+      hexInput.style.backgroundColor = '#444';
+      hexInput.style.color = '#fff';
+      hexInput.style.textTransform = 'uppercase';
+      
+      hexContainer.appendChild(hexLabel);
+      hexContainer.appendChild(hexInput);
+      
+      // Add RGB and Hex inputs to controls
+      controlsContainer.appendChild(rgbContainer);
+      controlsContainer.appendChild(hexContainer);
+      
+      // Function to convert RGB to Hex
+      function rgbToHex(r: number, g: number, b: number): string {
+        return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase();
+      }
+      
+      // Function to convert HSV to RGB
+      function hsvToRgb(h: number, s: number, v: number): {r: number, g: number, b: number} {
+        let r = 0, g = 0, b = 0;
+        h = h / 360;
+        s = s / 100;
+        v = v / 100;
+        
+        if (s === 0) {
+          r = g = b = v;
+        } else {
+          const i = Math.floor(h * 6);
+          const f = h * 6 - i;
+          const p = v * (1 - s);
+          const q = v * (1 - f * s);
+          const t = v * (1 - (1 - f) * s);
+          
+          switch (i % 6) {
+            case 0: r = v; g = t; b = p; break;
+            case 1: r = q; g = v; b = p; break;
+            case 2: r = p; g = v; b = t; break;
+            case 3: r = p; g = q; b = v; break;
+            case 4: r = t; g = p; b = v; break;
+            case 5: r = v; g = p; b = q; break;
           }
+        }
+        
+        return {
+          r: Math.round(r * 255),
+          g: Math.round(g * 255),
+          b: Math.round(b * 255)
+        };
+      }
+      
+      // Function to handle color square click/drag
+      function handleColorSquareInput(e: MouseEvent): void {
+        const rect = colorSquare.getBoundingClientRect();
+        
+        // Get cursor position in the square
+        let x = Math.max(0, Math.min(200, e.clientX - rect.left));
+        let y = Math.max(0, Math.min(200, e.clientY - rect.top));
+        
+        // Update cursor position
+        colorCursor.style.left = `${x}px`;
+        colorCursor.style.top = `${y}px`;
+        
+        // Calculate saturation and value/brightness
+        const s = (x / 200) * 100;
+        const v = 100 - (y / 200) * 100;
+        
+        // Get color from HSV
+        const h = parseInt(hueThumb.style.left) / 200 * 360;
+        const rgb = hsvToRgb(h, s, v);
+        
+        // Update RGB inputs
+        const rgbInputs = rgbContainer.querySelectorAll('input');
+        rgbInputs[0].value = rgb.r.toString();
+        rgbInputs[1].value = rgb.g.toString();
+        rgbInputs[2].value = rgb.b.toString();
+        
+        // Update hex input
+        hexInput.value = rgbToHex(rgb.r, rgb.g, rgb.b);
+        
+        // Apply the color
+        applyColor(rgb.r, rgb.g, rgb.b);
+      }
+      
+      // Function to handle hue slider click/drag
+      function handleHueSliderInput(e: MouseEvent): void {
+        const rect = hueSlider.getBoundingClientRect();
+        
+        // Get cursor position on the slider
+        let x = Math.max(0, Math.min(200, e.clientX - rect.left));
+        
+        // Update thumb position
+        hueThumb.style.left = `${x}px`;
+        
+        // Calculate hue
+        const h = (x / 200) * 360;
+        
+        // Update color square background
+        colorSquare.style.backgroundColor = `hsl(${h}, 100%, 50%)`;
+        
+        // Get existing saturation and value from cursor position
+        const s = (parseInt(colorCursor.style.left) / 200) * 100;
+        const v = 100 - (parseInt(colorCursor.style.top) / 200) * 100;
+        
+        // Get color from HSV
+        const rgb = hsvToRgb(h, s, v);
+        
+        // Update RGB inputs
+        const rgbInputs = rgbContainer.querySelectorAll('input');
+        rgbInputs[0].value = rgb.r.toString();
+        rgbInputs[1].value = rgb.g.toString();
+        rgbInputs[2].value = rgb.b.toString();
+        
+        // Update hex input
+        hexInput.value = rgbToHex(rgb.r, rgb.g, rgb.b);
+        
+        // Apply the color
+        applyColor(rgb.r, rgb.g, rgb.b);
+      }
+      
+      // Function to apply color
+      function applyColor(r: number, g: number, b: number): void {
+        const colorStr = `rgb(${r}, ${g}, ${b})`;
+        
+        // Apply to element
+        if (targetElement && targetElement.style) {
+          targetElement.style.setProperty(prop, colorStr, 'important');
+        }
+        
+        // Update preview
+        colorPreview.style.backgroundColor = colorStr;
+      }
+      
+      // Event listeners for color square (mouse down/move/up)
+      colorSquare.addEventListener('mousedown', (e) => {
+        handleColorSquareInput(e);
+        
+        // Add move and up listeners
+        document.addEventListener('mousemove', handleColorSquareInput);
+        document.addEventListener('mouseup', () => {
+          document.removeEventListener('mousemove', handleColorSquareInput);
+        }, { once: true });
+      });
+      
+      // Event listeners for hue slider (mouse down/move/up)
+      hueSlider.addEventListener('mousedown', (e) => {
+        handleHueSliderInput(e);
+        
+        // Add move and up listeners
+        document.addEventListener('mousemove', handleHueSliderInput);
+        document.addEventListener('mouseup', () => {
+          document.removeEventListener('mousemove', handleHueSliderInput);
+        }, { once: true });
+      });
+      
+      // Event listeners for RGB inputs
+      const rgbInputs = rgbContainer.querySelectorAll('input');
+      rgbInputs.forEach((input, index) => {
+        input.addEventListener('change', () => {
+          const r = parseInt(rgbInputs[0].value);
+          const g = parseInt(rgbInputs[1].value);
+          const b = parseInt(rgbInputs[2].value);
+          
+          // Update hex input
+          hexInput.value = rgbToHex(r, g, b);
+          
+          // Apply the color
+          applyColor(r, g, b);
+          
+          // TODO: Recalculate and update hue slider and color cursor position
+          // This is complex and would require converting RGB to HSV
+        });
+      });
+      
+      // Event listener for hex input
+      hexInput.addEventListener('change', () => {
+        let hex = hexInput.value;
+        
+        // Ensure it starts with #
+        if (!hex.startsWith('#')) {
+          hex = '#' + hex;
+        }
+        
+        // Validate hex format
+        if (/^#[0-9A-F]{6}$/i.test(hex)) {
+          // Convert hex to RGB
+          const r = parseInt(hex.slice(1, 3), 16);
+          const g = parseInt(hex.slice(3, 5), 16);
+          const b = parseInt(hex.slice(5, 7), 16);
+          
+          // Update RGB inputs
+          rgbInputs[0].value = r.toString();
+          rgbInputs[1].value = g.toString();
+          rgbInputs[2].value = b.toString();
+          
+          // Apply the color
+          applyColor(r, g, b);
+          
+          // TODO: Recalculate and update hue slider and color cursor position
         }
       });
       
+      // Assemble the color picker
+      pickerContainer.appendChild(colorSquare);
+      pickerContainer.appendChild(hueSlider);
+      pickerContainer.appendChild(controlsContainer);
+      
+      // Add to color section
       colorSection.appendChild(currentColor);
       colorSection.appendChild(colorPreview);
-      colorSection.appendChild(textInput);
-      colorSection.appendChild(paletteContainer);
+      colorSection.appendChild(pickerContainer);
       
       propContainer.appendChild(label);
       propContainer.appendChild(colorSection);
